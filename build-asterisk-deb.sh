@@ -99,7 +99,9 @@ fi
 log "5/7 Build dependencies (installed on this machine only, not packaged)"
 eval "$(grep -E '^PACKAGES_DEBIAN(_BUILD)?=' "$SRC/contrib/scripts/install_prereq")"
 DROP=" doxygen graphviz subversion wget "
-BUILD_PKGS="dpkg-dev binutils"
+# libjwt-dev is required by res_stir_shaken / res_pjsip_stir_shaken in Asterisk 21+,
+# but install_prereq does not list it; without it menuselect silently skips both modules.
+BUILD_PKGS="dpkg-dev binutils libjwt-dev"
 apt-get update
 for p in $PACKAGES_DEBIAN; do
   [[ "$DROP" == *" $p "* ]] && continue
@@ -142,6 +144,19 @@ MISSING=""
 for m in $REQUIRED_MODULES; do [ -f "$MODDIR/$m.so" ] || MISSING="$MISSING $m"; done
 [ -z "$MISSING" ] || die "required modules were not built:$MISSING  (see: cd $SRC && $MS --list-options)"
 echo "  All $(echo $REQUIRED_MODULES | wc -w) required modules were built."
+
+# Full module list check: every module in tools/expected-modules.txt must be built.
+# Catches modules that menuselect silently drops because a build dependency is missing.
+EXPECTED="$HERE/tools/expected-modules.txt"
+if [ -f "$EXPECTED" ] && [ -z "${SKIP_MODULE_LIST_CHECK:-}" ]; then
+  MISSING=""
+  while read -r m; do
+    case "$m" in ""|\#*) continue ;; esac
+    [ -f "$MODDIR/$m.so" ] || MISSING="$MISSING $m"
+  done < "$EXPECTED"
+  [ -z "$MISSING" ] || die "modules listed in tools/expected-modules.txt were not built:$MISSING"
+  echo "  All modules in tools/expected-modules.txt were built ($(grep -cv '^\(#\|$\)' "$EXPECTED"))."
+fi
 
 # Digium codecs
 DOCDIR="$DEST/var/lib/asterisk/documentation/thirdparty"

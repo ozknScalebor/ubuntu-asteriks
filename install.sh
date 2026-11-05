@@ -35,6 +35,12 @@ done
 export DEBIAN_FRONTEND=noninteractive
 HAS_SYSTEMD=0; [ -d /run/systemd/system ] && HAS_SYSTEMD=1
 
+ast_running() { # true while this system's Asterisk answers or its pid is alive
+  asterisk -rx 'core show version' >/dev/null 2>&1 && return 0
+  local pid; pid="$(cat /var/run/asterisk/asterisk.pid 2>/dev/null || true)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
 svc() { # svc <start|restart|enable> <name>   (falls back to direct start without systemd)
   if [ "$HAS_SYSTEMD" = 1 ]; then systemctl "$1" "$2"; return; fi
   [ "$1" = enable ] && return 0
@@ -43,8 +49,9 @@ svc() { # svc <start|restart|enable> <name>   (falls back to direct start withou
     asterisk) if [ "$1" = restart ]; then
                 asterisk -rx 'core stop now' >/dev/null 2>&1 || true
                 # wait until the old process is gone before starting a new one
-                for i in $(seq 1 20); do pgrep -x asterisk >/dev/null || break; sleep 1; done
-                pgrep -x asterisk >/dev/null && die "could not stop the running asterisk process"
+                # (checked via its control socket and pid file, not by process name)
+                for i in $(seq 1 20); do ast_running || break; sleep 1; done
+                ast_running && die "could not stop the running asterisk process"
               fi
               /usr/sbin/asterisk -U asterisk -G asterisk ;;
   esac

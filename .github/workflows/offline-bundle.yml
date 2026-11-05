@@ -57,7 +57,7 @@ jobs:
           check() { if eval "$2"; then echo "OK    $1"; else echo "FAIL  $1"; fail=1; fi; }
           dpkg-deb -c "$DEB" > contents.txt
           check "asterisk-offline .deb"            "test -s '$DEB'"
-          check "no compiler in Depends"           "! dpkg-deb -f '$DEB' Depends | grep -qE '(^|[ ,])(gcc|g\+\+|make)[ ,(]'"
+          check "no compiler in Depends"           "! dpkg-deb -f '$DEB' Depends | grep -E '(^|[ ,])(gcc|g\+\+|make)[ ,(]' >/dev/null"
           for m in $REQUIRED_MODULES; do check "module $m" "grep -q '/modules/$m.so\$' contents.txt"; done
           for m in $EXTERNAL_CODECS $G72X_CODECS; do check "codec $m" "grep -q '/modules/$m.so\$' contents.txt"; done
           for p in $SOUND_PACKAGES; do

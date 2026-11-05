@@ -207,8 +207,9 @@ for m in $REQUIRED_MODULES $EXTERNAL_CODECS ${G72X_CODECS:-}; do
 done
 # G.723.1 must be usable for transcoding in both directions
 if [ -n "${G72X_CODECS:-}" ] && [[ " $G72X_CODECS " == *" codec_g723 "* ]]; then
-  if asterisk -rx 'core show translation paths g723' | grep -qF '(g723@8000)->(slin@8000)' \
-     && asterisk -rx 'core show translation paths slin' | grep -qF '(slin@8000)->(g723@8000)'; then
+  # grep without -q: with pipefail, an early grep exit would SIGPIPE asterisk and fail the check
+  if asterisk -rx 'core show translation paths g723' | grep -F '(g723@8000)->(slin@8000)' >/dev/null \
+     && asterisk -rx 'core show translation paths slin' | grep -F '(slin@8000)->(g723@8000)' >/dev/null; then
     echo "    [OK]    G.723.1 <-> slin translation paths"
   else
     echo "    [FAIL]  no G.723.1 translation path"; FAIL="$FAIL g723-translation"

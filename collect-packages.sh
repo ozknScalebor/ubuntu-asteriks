@@ -77,7 +77,7 @@ python3 -m pip download --only-binary=:all: --dest "$B/wheels" \
 log "4/4 Summary"
 echo "  .deb files: $(ls "$B"/debs/*.deb | wc -l)"
 echo "  wheels:     $(ls "$B"/wheels/*.whl | wc -l)"
-if dpkg-deb -f "$DEB" Depends | grep -qE '(^|[ ,])(gcc|g\+\+|make)[ ,(]'; then die "the Asterisk package depends on a compiler"; fi
+if dpkg-deb -f "$DEB" Depends | grep -E '(^|[ ,])(gcc|g\+\+|make)[ ,(]' >/dev/null; then die "the Asterisk package depends on a compiler"; fi
 du -sh "$B"
 echo
 echo "Done. Copy this folder (including bundle/) to the offline machine and run:"

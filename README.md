@@ -49,7 +49,7 @@ The installation takes a few minutes. The log is written to `/var/log/asterisk-o
 
 ## What `install.sh` does
 
-1. Installs the packages from `bundle/debs` through a temporary local apt repository. The system's apt sources are not modified.
+1. Installs the packages from `bundle/debs` through a temporary local apt repository. The system's apt sources are not modified. Besides Asterisk, MySQL and ODBC this includes `curl` and MySQL's recommended packages, which the previous 18.13 package also installed.
 2. Creates the `asterisk` user and group.
 3. Checks that every module in `REQUIRED_MODULES` is present.
 4. Installs `/etc/asterisk` from `configs/asterisk/`. A previous `/etc/asterisk` is moved to `/etc/asterisk.bak-<timestamp>`.
@@ -116,13 +116,15 @@ Problems stop the installation instead of being skipped silently:
 
 | Stage | Check |
 |---|---|
-| Build | `build-asterisk-deb.sh` fails if a module in `REQUIRED_MODULES` was not built. menuselect silently skips modules with missing build dependencies. |
+| Build | `build-asterisk-deb.sh` fails if a module in `REQUIRED_MODULES` or in `tools/expected-modules.txt` (the full list of 345 modules) was not built. menuselect silently skips modules with missing build dependencies. |
 | Startup | `modules.conf` loads the ODBC modules with `preload-require`. If one cannot load, Asterisk exits instead of running without realtime. |
 | End of install | `install.sh` fails unless every required module is `Running` and the ODBC `asterisk` connection is active. |
 
 The default `REQUIRED_MODULES` covers what the current configuration uses: ODBC realtime, PJSIP + WSS, the dialplan functions, ConfBridge and ARI. If you add a feature to the configuration, add its module to the list.
 
 ## Notes
+
+- **Migrating from the Asterisk 18.13 package.** See [docs/migration-from-18.md](docs/migration-from-18.md) for the item-by-item comparison of modules, configuration files and system packages.
 
 - **`Macro()` → `Gosub()`.** `app_macro` was removed in Asterisk 21. The 666/777 conference flow uses `Gosub(sub-create_conference,s,1)` / `Gosub(sub-join_conference,s,1)` with the same `X-ConfNum` header and `GROUP(conference)` logic.
 - **Package name.** The package is `asterisk-offline`. It conflicts with Ubuntu's own `asterisk` packages (20.x on noble), so the two cannot be installed side by side.
@@ -142,6 +144,8 @@ configs/asterisk/           complete /etc/asterisk with placeholders
 configs/odbc/odbc.ini.in    ODBC DSN template
 configs/custom-vs-22.11-samples.diff   customisations vs. the stock samples
 tools/build-configs.py      regenerates configs/asterisk/ for a new Asterisk release
+tools/expected-modules.txt  every module the .deb must contain (build fails otherwise)
+docs/migration-from-18.md   item-by-item comparison with the previous 18.13 package
 .github/workflows/          GitHub Actions: build, offline install test, release
 ```
 

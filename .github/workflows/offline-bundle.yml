@@ -1,0 +1,149 @@
+# Builds the Asterisk .deb and the offline bundle on GitHub's Ubuntu 24.04 runner,
+# tests the installation in a container with no network access and publishes
+# the result as a GitHub release.
+#
+# Run:     Actions tab -> "Offline bundle" -> Run workflow
+# Output:  Releases -> asterisk-<version>-offline-ubuntu2404-<date>-r<run>.tar.gz
+
+name: Offline bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      asterisk_version:
+        description: "Asterisk version (empty = value in config.env)"
+        required: false
+        default: ""
+      test_install:
+        description: "Test the installation in a container without network access"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    outputs:
+      name: ${{ steps.pkg.outputs.name }}
+      version: ${{ steps.pkg.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set Asterisk version
+        if: inputs.asterisk_version != ''
+        run: sed -i 's/^ASTERISK_VERSION=.*/ASTERISK_VERSION="${{ inputs.asterisk_version }}"/' config.env
+
+      # The runner has extra apt sources (Microsoft, Docker, ...). Building and
+      # collecting inside a clean ubuntu:24.04 container keeps the packages
+      # identical to what the target machine expects.
+      - name: Build Asterisk .deb and collect packages (clean ubuntu:24.04)
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work ubuntu:24.04 bash -euc '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends curl ca-certificates python3 python3-pip apt-utils
+            bash ./collect-packages.sh
+          '
+          sudo chown -R "$(id -u):$(id -g)" bundle build
+
+      - name: Verify bundle contents
+        run: |
+          set -e
+          . ./config.env
+          DEB="bundle/debs/asterisk-offline_${ASTERISK_VERSION}-1_amd64.deb"
+          fail=0
+          check() { if eval "$2"; then echo "OK    $1"; else echo "FAIL  $1"; fail=1; fi; }
+          dpkg-deb -c "$DEB" > contents.txt
+          check "asterisk-offline .deb"            "test -s '$DEB'"
+          check "no compiler in Depends"           "! dpkg-deb -f '$DEB' Depends | grep -qE '(^|[ ,])(gcc|g\+\+|make)[ ,(]'"
+          for m in $REQUIRED_MODULES; do check "module $m" "grep -q '/modules/$m.so\$' contents.txt"; done
+          for m in $EXTERNAL_CODECS;  do check "codec $m"  "grep -q '/modules/$m.so\$' contents.txt"; done
+          for p in $SOUND_PACKAGES; do
+            case "$p" in
+              CORE-SOUNDS-EN-GSM)  check "$p" "grep -q 'sounds/en/hello-world.gsm\$' contents.txt" ;;
+              EXTRA-SOUNDS-EN-WAV) check "$p" "grep -q 'sounds/en/.*\.wav\$' contents.txt" ;;
+              MOH-OPSOUND-WAV)     check "$p" "grep -q '/moh/.*\.wav\$' contents.txt" ;;
+            esac
+          done
+          check "systemd unit"                     "grep -q 'systemd/system/asterisk.service\$' contents.txt"
+          check "alembic scripts"                  "grep -q 'ast-db-manage/config.ini.sample\$' contents.txt"
+          check "no /etc/asterisk in package"      "! grep -q '\./etc/asterisk/' contents.txt"
+          check "local apt index"                  "test -s bundle/debs/Packages"
+          check "alembic wheel"                    "compgen -G 'bundle/wheels/alembic-*.whl' >/dev/null"
+          echo "debs: $(ls bundle/debs/*.deb | wc -l)  wheels: $(ls bundle/wheels/*.whl | wc -l)"
+          dpkg-deb -f "$DEB" Package Version Installed-Size
+          du -sh bundle
+          exit $fail
+
+      - name: Archive
+        id: pkg
+        run: |
+          . ./config.env
+          NAME="asterisk-${ASTERISK_VERSION}-offline-ubuntu2404-$(date -u +%Y%m%d)-r${GITHUB_RUN_NUMBER}"
+          mkdir -p "dist/$NAME"
+          cp -a README.md config.env install.sh collect-packages.sh build-asterisk-deb.sh configs tools bundle "dist/$NAME/"
+          chmod +x "dist/$NAME"/*.sh
+          tar -C dist -czf "dist/$NAME.tar.gz" "$NAME"
+          (cd dist && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
+          rm -rf "dist/$NAME"
+          ls -la dist
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$ASTERISK_VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle
+          path: dist/
+          retention-days: 7
+          compression-level: 0
+
+  test:
+    needs: build
+    if: inputs.test_install
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundle
+          path: dist
+
+      - name: Install in a container with no network access
+        run: |
+          NAME="${{ needs.build.outputs.name }}"
+          (cd dist && sha256sum -c "$NAME.tar.gz.sha256")
+          tar -C dist -xzf "dist/$NAME.tar.gz"
+          # --network none: the container has no network access at all
+          docker run --rm --network none -v "$PWD/dist/$NAME:/pkg" ubuntu:24.04 bash -euc '
+            cd /pkg && bash ./install.sh
+            echo
+            echo "Compiler present on target after install?"
+            if dpkg -s gcc >/dev/null 2>&1; then echo "  yes (unexpected)"; exit 1; else echo "  no"; fi
+          '
+
+  release:
+    needs: [build, test]
+    if: always() && needs.build.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundle
+          path: dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NAME="${{ needs.build.outputs.name }}"
+          TESTED="${{ needs.test.result == 'success' && 'Installation test passed in an ubuntu:24.04 container with no network access.' || 'Installation test was not run.' }}"
+          gh release create "$NAME" dist/"$NAME".tar.gz dist/"$NAME".tar.gz.sha256 \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$NAME" \
+            --notes "Asterisk ${{ needs.build.outputs.version }} offline installation bundle for Ubuntu 24.04.
+
+          $TESTED
+
+          Usage: copy the archive to the offline Ubuntu 24.04 machine, extract it,
+          adjust config.env if needed and run: sudo bash install.sh"

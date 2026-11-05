@@ -21,7 +21,7 @@ Asterisk is compiled once (on GitHub Actions or any internet-connected Ubuntu 24
 
 1. Open **Actions → Offline bundle → Run workflow**. Optionally enter a different Asterisk version.
 2. The workflow runs three jobs:
-   - **build**: compiles Asterisk into a `.deb` and downloads every runtime dependency inside a clean `ubuntu:24.04` container. The `.deb` includes the sound packages, `codec_opus`, the systemd unit and the alembic scripts. The bundle contents are checked before continuing.
+   - **build**: compiles Asterisk into a `.deb` and downloads every runtime dependency inside a clean `ubuntu:24.04` container. The `.deb` includes the sound packages, `codec_opus`, `codec_g723`, the systemd unit and the alembic scripts. The bundle contents are checked before continuing.
    - **test**: extracts the bundle in an `ubuntu:24.04` container started with `--network none` and runs `install.sh` end to end. It also checks that no compiler was installed.
    - **release**: if the test passes, publishes `asterisk-<version>-offline-ubuntu2404-<date>-r<run>.tar.gz` and its `.sha256` under **Releases**.
 3. Download the `.tar.gz` from the release.
@@ -71,6 +71,7 @@ All versions, passwords and switches are in `config.env`:
 |---|---|
 | `ASTERISK_VERSION` | Asterisk release to build |
 | `SOUND_PACKAGES`, `EXTERNAL_CODECS` | Sound packages and prebuilt Digium codecs included in the `.deb` |
+| `G72X_CODECS`, `G72X_CPU` | Prebuilt asterisk-g72x codecs (G.723.1) included in the `.deb`, and their CPU variant |
 | `REQUIRED_MODULES` | Modules that must be built and running (see *Verification*) |
 | `DB_NAME`, `DB_USER`, `DB_PASS` | Asterisk database and the user ODBC/alembic connect with |
 | `ROOT_REMOTE`, `ROOT_REMOTE_PASS` | Create `'root'@'%'` for remote access |
@@ -129,7 +130,7 @@ The default `REQUIRED_MODULES` covers what the current configuration uses: ODBC 
 - **`Macro()` → `Gosub()`.** `app_macro` was removed in Asterisk 21. The 666/777 conference flow uses `Gosub(sub-create_conference,s,1)` / `Gosub(sub-join_conference,s,1)` with the same `X-ConfNum` header and `GROUP(conference)` logic.
 - **Package name.** The package is `asterisk-offline`. It conflicts with Ubuntu's own `asterisk` packages (20.x on noble), so the two cannot be installed side by side.
 - **Portable build.** `BUILD_NATIVE` is disabled, so the `.deb` is not tied to the CPU of the build machine.
-- **No G.723.1.** A prebuilt `codec_g723.so` from an old asterisk-g72x build cannot be loaded by Asterisk 22. If G.723.1 is needed, asterisk-g72x has to be rebuilt against Asterisk 22 (requires Intel IPP).
+- **G.723.1.** `codec_g723.so` is the asterisk-g72x author's prebuilt module for Asterisk 22 (from asterisk.hosting.lv, checked against the published MD5SUM). Intel IPP is linked statically into it. It cannot be compiled from source in this project because G.723.1 needs Intel's discontinued IPP speech codec libraries. The default CPU variant `x86_64-pentium4` runs on every x86-64 CPU. `install.sh` checks that the module runs and that G.723.1 ↔ slin translation works. The send rate is set in `codecs.conf` (`[g723] sendrate=63` or `53`).
 - **ConfBridge language.** `confbridge.conf` uses `language=en_GB`, but only `en` sounds are packaged.
 - **Package freshness.** Packages are as current as the day the bundle was built. Rebuild the bundle before a new installation to pick up security updates.
 

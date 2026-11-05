@@ -59,7 +59,7 @@ jobs:
           check "asterisk-offline .deb"            "test -s '$DEB'"
           check "no compiler in Depends"           "! dpkg-deb -f '$DEB' Depends | grep -qE '(^|[ ,])(gcc|g\+\+|make)[ ,(]'"
           for m in $REQUIRED_MODULES; do check "module $m" "grep -q '/modules/$m.so\$' contents.txt"; done
-          for m in $EXTERNAL_CODECS;  do check "codec $m"  "grep -q '/modules/$m.so\$' contents.txt"; done
+          for m in $EXTERNAL_CODECS $G72X_CODECS; do check "codec $m" "grep -q '/modules/$m.so\$' contents.txt"; done
           for p in $SOUND_PACKAGES; do
             case "$p" in
               CORE-SOUNDS-EN-GSM)  check "$p" "grep -q 'sounds/en/hello-world.gsm\$' contents.txt" ;;

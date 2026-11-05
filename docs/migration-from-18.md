@@ -170,5 +170,5 @@ To keep parity with the old package, `collect-packages.sh` also installs:
 | pjproject | 2.12 (bundled) | 2.17 (bundled) |
 | Sounds | core-sounds-en-gsm, moh-opsound-wav, extra-sounds-en-wav (cached) | the same three, built into the `.deb` |
 | `codec_opus` | `codec_opus.so` | `codec_opus.so` and `format_ogg_opus.so` |
-| `codec_g723` | prebuilt `codec_g723.so` (asterisk-g72x, GCC 4.6.3, 2012) | **not included**: a module built for old Asterisk cannot be loaded by Asterisk 22. Needs a rebuild of asterisk-g72x against Asterisk 22 (requires Intel IPP). |
+| `codec_g723` | prebuilt `codec_g723.so` (asterisk-g72x, built with GCC 4.6.3 in 2012) | asterisk-g72x 1.4.5 prebuilt module for Asterisk 22 (`codec_g723-ast220-gcc4-glibc-x86_64-pentium4.so`, MD5-verified), IPP linked statically. `install.sh` verifies that it runs and that G.723.1 ↔ slin translation works. |
 | `make progdocs` | API documentation generated on the target | not generated (documentation only) |

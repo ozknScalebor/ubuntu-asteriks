@@ -198,13 +198,22 @@ echo; asterisk -rx 'module show like opus'
 
 echo; echo "  Verification:"
 FAIL=""
-for m in $REQUIRED_MODULES; do
+for m in $REQUIRED_MODULES $EXTERNAL_CODECS ${G72X_CODECS:-}; do
   if asterisk -rx "module show like $m.so" | grep -E "^$m\\.so .*Running" >/dev/null; then
     echo "    [OK]    $m"
   else
     echo "    [FAIL]  $m is not running"; FAIL="$FAIL $m"
   fi
 done
+# G.723.1 must be usable for transcoding in both directions
+if [ -n "${G72X_CODECS:-}" ] && [[ " $G72X_CODECS " == *" codec_g723 "* ]]; then
+  if asterisk -rx 'core show translation paths g723' | grep -qF '(g723@8000)->(slin@8000)' \
+     && asterisk -rx 'core show translation paths slin' | grep -qF '(slin@8000)->(g723@8000)'; then
+    echo "    [OK]    G.723.1 <-> slin translation paths"
+  else
+    echo "    [FAIL]  no G.723.1 translation path"; FAIL="$FAIL g723-translation"
+  fi
+fi
 ACTIVE="$(asterisk -rx 'odbc show asterisk' | sed -n 's/.*Number of active connections: \([0-9]*\).*/\1/p')"
 if [ "${ACTIVE:-0}" -ge 1 ]; then
   echo "    [OK]    ODBC 'asterisk' connection is active"

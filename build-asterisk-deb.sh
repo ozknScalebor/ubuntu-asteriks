@@ -95,6 +95,23 @@ if [ -z "${SKIP_EXTERNAL_CODECS:-}" ]; then
   done
 fi
 
+# asterisk-g72x prebuilt modules (G.723.1)
+if [ -z "${SKIP_EXTERNAL_CODECS:-}" ] && [ -n "${G72X_CODECS:-}" ]; then
+  G72X_TAG="ast${ASTERISK_VERSION%%.*}0-gcc4-glibc-$G72X_CPU"        # e.g. ast220-gcc4-glibc-x86_64-pentium4
+  g72x_get() { curl -fL --retry 3 --connect-timeout 20 -o "$2.part" "https://asterisk.hosting.lv/bin/$1" \
+               || curl -fL --retry 3 --connect-timeout 20 -o "$2.part" "http://asterisk.hosting.lv/bin/$1"; mv "$2.part" "$2"; }
+  echo "  downloading asterisk-g72x MD5SUM"; g72x_get MD5SUM "$W/dl/g72x-MD5SUM"
+  for m in $G72X_CODECS; do
+    f="$m-$G72X_TAG.so"
+    if [ ! -s "$CACHE/$f" ]; then echo "  downloading: $f"; g72x_get "$f" "$CACHE/$f"; fi
+    want="$(awk -v f="$f" '$2==f || $2=="*"f {print $1}' "$W/dl/g72x-MD5SUM")"
+    got="$(md5sum "$CACHE/$f" | cut -d' ' -f1)"
+    [ -n "$want" ] || die "$f is not listed in the asterisk-g72x MD5SUM file"
+    [ "$want" = "$got" ] || die "$f MD5 mismatch ($got != $want)"
+    echo "  $f MD5 OK"
+  done
+fi
+
 # ---------------------------------------------------------------------
 log "5/7 Build dependencies (installed on this machine only, not packaged)"
 eval "$(grep -E '^PACKAGES_DEBIAN(_BUILD)?=' "$SRC/contrib/scripts/install_prereq")"
@@ -171,6 +188,14 @@ for m in $EXTERNAL_CODECS; do
   rm -rf "$t"
 done
 
+# asterisk-g72x codecs (installed under their plain module name, e.g. codec_g723.so)
+for m in ${G72X_CODECS:-}; do
+  f="$CACHE/$m-ast${ASTERISK_VERSION%%.*}0-gcc4-glibc-$G72X_CPU.so"
+  [ -s "$f" ] || { echo "  WARNING: $(basename "$f") is not in the cache and will not be packaged"; continue; }
+  install -m 755 "$f" "$MODDIR/$m.so"
+  echo "  $(basename "$f") -> $m.so"
+done
+
 # systemd unit and alembic schema scripts
 install -D -m 644 contrib/systemd/asterisk.service "$DEST/usr/lib/systemd/system/asterisk.service"
 mkdir -p "$DEST/usr/share/asterisk"
@@ -190,7 +215,7 @@ mkdir -p "$DEST/usr/share/doc/$PKG"
   echo "Build date:        $(date -u +%Y-%m-%dT%H:%MZ)"
   echo "Build system:      $PRETTY_NAME"
   echo "Sound packages:    $SOUND_PACKAGES"
-  echo "Prebuilt codecs:   $EXTERNAL_CODECS"
+  echo "Prebuilt codecs:   $EXTERNAL_CODECS ${G72X_CODECS:-} (asterisk-g72x $G72X_CPU)"
   echo "Required modules:  $REQUIRED_MODULES"
   echo; echo "Modules in this package:"; ls "$MODDIR" | sed 's/^/  /'
 } > "$DEST/usr/share/doc/$PKG/BUILD-INFO"
@@ -222,7 +247,8 @@ Conflicts: asterisk, asterisk-modules, asterisk-config, asterisk-core-sounds-en
 Replaces: asterisk, asterisk-modules
 Description: Asterisk $ASTERISK_VERSION PBX built from source for offline installation
  Includes bundled pjproject $PJPROJECT_VERSION, sound packages, codec_opus,
- the systemd unit and the alembic schema scripts. /etc/asterisk is not included.
+ codec_g723 (asterisk-g72x), the systemd unit and the alembic schema scripts.
+ /etc/asterisk is not included.
 EOF
 echo "activate-noawait ldconfig" > "$DEST/DEBIAN/triggers"
 

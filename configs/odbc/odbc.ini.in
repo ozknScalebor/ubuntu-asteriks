@@ -1,0 +1,9 @@
+[asterisk]
+Description = MySQL connection to '@@DB_NAME@@' database
+Driver      = MariaDB Unicode
+Server      = localhost
+Port        = 3306
+Socket      = /var/run/mysqld/mysqld.sock
+Database    = @@DB_NAME@@
+User        = @@DB_USER@@
+Password    = @@DB_PASS@@

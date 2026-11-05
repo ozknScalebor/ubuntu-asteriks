@@ -42,8 +42,13 @@ dpkg-deb -f "$DEB" Package Version
 # ---------------------------------------------------------------------
 log "2/4 Runtime .deb packages (full dependency closure)"
 # Packages install.sh asks apt for. Build tools (gcc, -dev) are NOT included.
-echo "asterisk-offline mysql-server mysql-client unixodbc odbcinst odbc-mariadb python3-venv" \
-  | tr ' ' '\n' > "$B/debs/PACKAGE-LIST.txt"
+#   core:   Asterisk, MySQL, ODBC, Python venv for alembic
+#   parity: runtime packages the previous Asterisk 18.13 package also installed:
+#           mysql-server's recommended packages (the old package shipped them)
+#           and the curl command-line tool
+CORE_PKGS="asterisk-offline mysql-server mysql-client unixodbc odbcinst odbc-mariadb python3-venv"
+PARITY_PKGS="libhtml-template-perl mecab-ipadic-utf8 libcgi-fast-perl curl"
+echo "$CORE_PKGS $PARITY_PKGS" | tr ' ' '\n' > "$B/debs/PACKAGE-LIST.txt"
 
 apt-get update
 command -v apt-ftparchive >/dev/null || apt-get install -y apt-utils

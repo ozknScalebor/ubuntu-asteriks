@@ -1,0 +1,40 @@
+# Temporary diagnostics for the G.723.1 translation check. Reuses the bundle
+# artifact of an earlier "Offline bundle" run, so nothing is rebuilt.
+name: Debug G.723.1
+
+on:
+  push:
+    branches: [debug/g723]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundle
+          path: dist
+          run-id: 41978794372
+          github-token: ${{ github.token }}
+
+      - name: Install and collect G.723.1 diagnostics
+        run: |
+          tar -C dist -xzf dist/*.tar.gz
+          NAME="$(basename dist/*.tar.gz .tar.gz)"
+          docker run --rm --network none -v "$PWD/dist/$NAME:/pkg" ubuntu:24.04 bash -c '
+            cd /pkg && bash ./install.sh > /tmp/install.log 2>&1; echo "install.sh exit=$?"
+            a() { echo; echo "### $1"; asterisk -rx "$1" 2>&1; }
+            a "module show like g723"
+            a "core show codecs audio"
+            a "core show translation paths g723"
+            a "core show translation paths slin"
+            a "core show translation"
+            echo; echo "### log lines"; grep -inE "g72|723|translat" /var/log/asterisk/messages.log | tail -40
+            echo; echo "### codec_g723.so"; ls -la /usr/lib/asterisk/modules/codec_g723.so
+            nm -D /usr/lib/asterisk/modules/codec_g723.so | grep -iE "register|translator|format" | head -20
+            echo; echo "### format modules"; asterisk -rx "module show like format_g7"
+          '

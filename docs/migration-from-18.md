@@ -59,7 +59,7 @@ The old package shipped 117 files. **107 were byte-identical to the stock Asteri
 
 | | Count | Handling |
 |---|---|---|
-| Customised in the old package | 10 | Same changes applied to the 22.11 samples (see below) |
+| Customised in the old package | 10 | Same changes applied to the 22.11 samples (see below); `codecs.conf` additionally gets a `[g723]` section |
 | Stock samples, still in 22.11 | 91 | Replaced by the 22.11 stock samples |
 | Stock samples, module removed in 22.11 | 16 | Not shipped (table below) |
 | New samples in 22.11 | 5 | Shipped as stock: `chan_websocket.conf`, `geolocation.conf`, `res_config_odbc.conf`, `res_http_media_cache.conf`, `websocket_client.conf` |
@@ -97,6 +97,7 @@ All 16 were unmodified stock samples in the old package, so no setting is lost.
 | `res_config_mysql.conf` | root credentials | placeholders | Same content; the module is not built (as before). |
 | `ari.conf` | user `user` / `user` | placeholders, defaults `user` / `user` | Unchanged otherwise. |
 | `extconfig.conf`, `sorcery.conf`, `http.conf`, `pjsip.conf`, `confbridge.conf` | — | identical changes | Options are valid in 22.11 without changes. |
+| `codecs.conf` | no `[g723]` section (codec default 6.3 kbps) | `[g723] sendrate=63` | Added so the G.723.1 send rate of the new `codec_g723` is visible and adjustable; behaviour is unchanged. |
 
 Checked on a running Asterisk 22.11:
 

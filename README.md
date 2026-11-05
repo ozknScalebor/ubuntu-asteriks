@@ -100,6 +100,7 @@ Customisations compared to the stock samples (full diff: `configs/custom-vs-22.1
 | `confbridge.conf` | `my_bridge`, `my_user`, `my_menu` profiles |
 | `extensions.conf` | `[default]` → `Dial(PJSIP/${EXTEN})`; 666/777 conference via `Gosub` |
 | `res_config_mysql.conf` | database settings (unused, ODBC is used instead) |
+| `codecs.conf` | `[g723] sendrate=63` for `codec_g723` (6.3 kbps, the codec's default made explicit) |
 
 Credentials in these files are `@@DB_USER@@`, `@@DB_PASS@@`, `@@DB_NAME@@`, `@@ARI_USER@@` and `@@ARI_PASS@@` placeholders. `install.sh` fills them in from `config.env`.
 

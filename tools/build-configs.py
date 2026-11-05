@@ -58,6 +58,14 @@ EDITS = {
          "3=toggle_mute\n"
          "*0=no_op\n"),
     ],
+    # --- G.723.1 (codec_g723 from asterisk-g72x reads [g723] in codecs.conf) --
+    "codecs.conf": [
+        (APPEND,
+         "\n; G.723.1 send rate for outgoing audio: 63 = 6.3 kbps (codec default), 53 = 5.3 kbps.\n"
+         "; Incoming streams are decoded at either rate automatically.\n"
+         "[g723]\n"
+         "sendrate=63\n"),
+    ],
     # --- PJSIP realtime tables -> ODBC ---------------------------------------
     "extconfig.conf": [
         (APPEND,

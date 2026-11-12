@@ -1,5 +1,5 @@
 --- /home/claude/work/s22/configs/samples/ari.conf.sample	2026-08-27 15:29:40.000000000 +0000
-+++ configs/asterisk/ari.conf	2026-11-05 11:11:51.114806046 +0000
++++ configs/asterisk/ari.conf	2026-11-12 15:16:30.436741929 +0000
 @@ -1,6 +1,6 @@
  [general]
  enabled = yes       ; When set to no, ARI support is disabled.
@@ -19,7 +19,7 @@
 +password=@@ARI_PASS@@
 +password_format=plain
 --- /home/claude/work/s22/configs/samples/codecs.conf.sample	2026-08-27 15:29:40.000000000 +0000
-+++ configs/asterisk/codecs.conf	2026-11-05 11:11:51.114982588 +0000
++++ configs/asterisk/codecs.conf	2026-11-12 15:16:30.437022356 +0000
 @@ -212,3 +212,8 @@
  ;max_bandwidth=wide ; Maximum encoded bandwidth set to wide band (0-8000 Hz
  ;                   ; audio bandwidth at 16Khz sample rate)
@@ -30,7 +30,7 @@
 +[g723]
 +sendrate=63
 --- /home/claude/work/s22/configs/samples/confbridge.conf.sample	2026-08-27 15:29:40.000000000 +0000
-+++ configs/asterisk/confbridge.conf	2026-11-05 11:11:51.114915604 +0000
++++ configs/asterisk/confbridge.conf	2026-11-12 15:16:30.436898526 +0000
 @@ -459,3 +459,27 @@
  8=no_op
  *9=increase_talking_volume
@@ -60,7 +60,7 @@
 +3=toggle_mute
 +*0=no_op
 --- /home/claude/work/s22/configs/samples/extconfig.conf.sample	2026-08-27 15:29:40.000000000 +0000
-+++ configs/asterisk/extconfig.conf	2026-11-05 11:11:51.115060959 +0000
++++ configs/asterisk/extconfig.conf	2026-11-12 15:16:30.437125513 +0000
 @@ -108,3 +108,10 @@
  ; note that using dynamic realtime extensions is not recommended anymore as a
  ; best practice; instead, you should consider writing a static dialplan with
@@ -73,8 +73,8 @@
 +ps_endpoint_id_ips => odbc,asterisk
 +ps_contacts => odbc,asterisk
 --- /home/claude/work/s22/configs/samples/extensions.conf.sample	2026-08-27 15:29:40.000000000 +0000
-+++ configs/asterisk/extensions.conf	2026-11-05 11:11:51.115142943 +0000
-@@ -878,3 +878,23 @@
++++ configs/asterisk/extensions.conf	2026-11-12 15:16:30.437246212 +0000
+@@ -878,3 +878,30 @@
  ;    same => n,PJSIPNotify(,&Event=Custom&Content-type=application/voicemail&Content=check-messages&Content=)
  ;    same => n,Wait(1)
  ;    same => n,Hangup()
@@ -87,6 +87,8 @@
 +; app_macro was removed in Asterisk 21; same flow with Gosub.
 +exten => 666,1,Gosub(sub-create_conference,s,1)
 +exten => 777,1,Gosub(sub-join_conference,s,1)
++; Joins the fixed conference 1234 (no X-ConfNum header needed).
++exten => 888,1,Gosub(sub-join_conference2,s,1)
 +
 +[sub-create_conference]
 +exten => s,1,Set(__CONFERENCENUM=${PJSIP_HEADER(read,X-ConfNum)})
@@ -98,8 +100,13 @@
 +exten => s,1,Set(__CONFERENCENUM=${PJSIP_HEADER(read,X-ConfNum)})
 +same => n,ConfBridge(${CONFERENCENUM},my_bridge,my_user)
 +same => n,Return()
++
++[sub-join_conference2]
++exten => s,1,Set(__CONFERENCENUM=1234)
++same => n,ConfBridge(1234,my_bridge,my_user)
++same => n,Return()
 --- /home/claude/work/s22/configs/samples/http.conf.sample	2026-08-27 15:29:40.000000000 +0000
-+++ configs/asterisk/http.conf	2026-11-05 11:11:51.115232201 +0000
++++ configs/asterisk/http.conf	2026-11-12 15:16:30.437376856 +0000
 @@ -26,17 +26,17 @@
  ; Whether HTTP/HTTPS interface is enabled or not.  Default is no.
  ; This also affects manager/rawman/mxml access (see manager.conf)
@@ -122,8 +129,8 @@
  ; Prefix allows you to specify a prefix for all requests
  ; to the server.  The default is blank.  If uncommented
 --- /home/claude/work/s22/configs/samples/modules.conf.sample	2026-08-27 15:29:40.000000000 +0000
-+++ configs/asterisk/modules.conf	2026-11-05 11:11:51.115319122 +0000
-@@ -49,3 +49,8 @@
++++ configs/asterisk/modules.conf	2026-11-12 15:16:30.437498393 +0000
+@@ -49,3 +49,17 @@
  ;noload = app_voicemail.so
  noload = app_voicemail_imap.so
  noload = app_voicemail_odbc.so
@@ -132,8 +139,17 @@
 +; refuses to start instead of silently running without realtime.
 +preload-require => res_odbc.so
 +preload-require => res_config_odbc.so
++
++; RADIUS CDR/CEL are not used. Asterisk looks for
++; /etc/radiusclient-ng/radiusclient.conf while Ubuntu's radcli installs
++; /etc/radcli/radiusclient.conf, so these modules could not load in the previous
++; 18.13 package either. To use RADIUS accounting, remove these lines and set
++; radiuscfg => /etc/radcli/radiusclient.conf in the [radius] section of
++; cdr.conf and cel.conf.
++noload => cdr_radius.so
++noload => cel_radius.so
 --- /home/claude/work/s22/configs/samples/pjsip.conf.sample	2026-08-27 15:29:40.000000000 +0000
-+++ configs/asterisk/pjsip.conf	2026-11-05 11:11:51.115484546 +0000
++++ configs/asterisk/pjsip.conf	2026-11-12 15:16:30.437728127 +0000
 @@ -1759,3 +1759,13 @@
  ; TEL URIs are allowed in the request, From, and To headers.
  ;
@@ -149,7 +165,7 @@
 +protocol=wss
 +bind=0.0.0.0
 --- /home/claude/work/s22/configs/samples/res_config_mysql.conf.sample	2026-08-27 15:29:40.000000000 +0000
-+++ configs/asterisk/res_config_mysql.conf	2026-11-05 11:11:51.115597965 +0000
++++ configs/asterisk/res_config_mysql.conf	2026-11-12 15:16:30.437842304 +0000
 @@ -33,11 +33,11 @@
  ; widen a table column width to meet the requirements specified.
  ;
@@ -168,7 +184,7 @@
  ;dbcharset = latin1
  ;requirements=warn ; or createclose or createchar
 --- /home/claude/work/s22/configs/samples/res_odbc.conf.sample	2026-08-27 15:29:40.000000000 +0000
-+++ configs/asterisk/res_odbc.conf	2026-11-05 11:11:51.116292347 +0000
++++ configs/asterisk/res_odbc.conf	2026-11-12 15:16:30.437979716 +0000
 @@ -17,11 +17,14 @@
  ;
  ; Permit disabling sections without needing to comment them out.
@@ -186,7 +202,7 @@
  ; Username for connecting to the database.  The user defaults to the context name if unspecified.
  ;username => myuser
 --- /home/claude/work/s22/configs/samples/sorcery.conf.sample	2026-08-27 15:29:40.000000000 +0000
-+++ configs/asterisk/sorcery.conf	2026-11-05 11:11:51.116382150 +0000
++++ configs/asterisk/sorcery.conf	2026-11-12 15:16:30.438094732 +0000
 @@ -70,11 +70,12 @@
  ; The following object mappings set PJSIP objects to use realtime database mappings from extconfig
  ; with the table names used when automatically generating configuration from the alembic script.

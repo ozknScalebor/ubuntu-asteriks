@@ -87,6 +87,8 @@ EDITS = {
          "; app_macro was removed in Asterisk 21; same flow with Gosub.\n"
          "exten => 666,1,Gosub(sub-create_conference,s,1)\n"
          "exten => 777,1,Gosub(sub-join_conference,s,1)\n"
+         "; Joins the fixed conference 1234 (no X-ConfNum header needed).\n"
+         "exten => 888,1,Gosub(sub-join_conference2,s,1)\n"
          "\n[sub-create_conference]\n"
          "exten => s,1,Set(__CONFERENCENUM=${PJSIP_HEADER(read,X-ConfNum)})\n"
          "same => n,Set(GROUP(conference)=${CONFERENCENUM})\n"
@@ -95,6 +97,10 @@ EDITS = {
          "\n[sub-join_conference]\n"
          "exten => s,1,Set(__CONFERENCENUM=${PJSIP_HEADER(read,X-ConfNum)})\n"
          "same => n,ConfBridge(${CONFERENCENUM},my_bridge,my_user)\n"
+         "same => n,Return()\n"
+         "\n[sub-join_conference2]\n"
+         "exten => s,1,Set(__CONFERENCENUM=1234)\n"
+         "same => n,ConfBridge(1234,my_bridge,my_user)\n"
          "same => n,Return()\n"),
     ],
     # --- HTTP (for ARI and WSS) -----------------------------------------------
@@ -109,7 +115,15 @@ EDITS = {
          "\n; ODBC realtime is mandatory: if a module fails to load, Asterisk\n"
          "; refuses to start instead of silently running without realtime.\n"
          "preload-require => res_odbc.so\n"
-         "preload-require => res_config_odbc.so\n"),
+         "preload-require => res_config_odbc.so\n"
+         "\n; RADIUS CDR/CEL are not used. Asterisk looks for\n"
+         "; /etc/radiusclient-ng/radiusclient.conf while Ubuntu's radcli installs\n"
+         "; /etc/radcli/radiusclient.conf, so these modules could not load in the previous\n"
+         "; 18.13 package either. To use RADIUS accounting, remove these lines and set\n"
+         "; radiuscfg => /etc/radcli/radiusclient.conf in the [radius] section of\n"
+         "; cdr.conf and cel.conf.\n"
+         "noload => cdr_radius.so\n"
+         "noload => cel_radius.so\n"),
     ],
     # --- PJSIP transports -----------------------------------------------------
     "pjsip.conf": [

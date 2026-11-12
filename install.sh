@@ -182,7 +182,18 @@ echo "SELECT COUNT(*) AS ps_tables FROM information_schema.tables WHERE table_sc
 
 # ---------------------------------------------------------------------
 log "8/8 Asterisk service and verification"
-[ "$HAS_SYSTEMD" = 1 ] && systemctl daemon-reload
+if [ "$HAS_SYSTEMD" = 1 ]; then
+  # Start Asterisk only after the local MySQL is ready (mysql.service is Type=notify).
+  # Otherwise res_odbc fails its pre-connect at boot and, with the default
+  # negative_connection_cache of 300 s, realtime stays unavailable for 5 minutes.
+  mkdir -p /etc/systemd/system/asterisk.service.d
+  cat > /etc/systemd/system/asterisk.service.d/10-mysql.conf <<'UNIT'
+[Unit]
+Wants=mysql.service
+After=mysql.service
+UNIT
+  systemctl daemon-reload
+fi
 svc enable asterisk
 if ! svc restart asterisk; then
   [ "$HAS_SYSTEMD" = 1 ] && { systemctl status asterisk --no-pager -l || true; journalctl -u asterisk -n 50 --no-pager || true; }

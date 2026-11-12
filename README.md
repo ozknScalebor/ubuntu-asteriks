@@ -60,7 +60,7 @@ The installation takes a few minutes. The log is written to `/var/log/asterisk-o
    - creates the database and a dedicated `asterisk` user
    - optionally allows remote root access and binds to all interfaces
 7. Configures the ODBC DSN `asterisk` and creates the schema with alembic.
-8. Starts Asterisk via systemd and verifies the installation (see below).
+8. Starts Asterisk via systemd and verifies the installation (see below). A drop-in (`/etc/systemd/system/asterisk.service.d/10-mysql.conf`) makes Asterisk start after MySQL, so ODBC realtime is available right after a reboot.
 
 ## Configuration
 

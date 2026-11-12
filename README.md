@@ -23,6 +23,7 @@ Asterisk is compiled once (on GitHub Actions or any internet-connected Ubuntu 24
 2. The workflow runs three jobs:
    - **build**: compiles Asterisk into a `.deb` and downloads every runtime dependency inside a clean `ubuntu:24.04` container. The `.deb` includes the sound packages, `codec_opus`, `codec_g723`, the systemd unit and the alembic scripts. The bundle contents are checked before continuing.
    - **test**: extracts the bundle in an `ubuntu:24.04` container started with `--network none` and runs `install.sh` end to end. It also checks that no compiler was installed.
+   - **test-systemd**: the same offline installation on `ubuntu:24.04` running systemd, followed by a reboot of the container. MySQL and Asterisk must come back on their own, with an active ODBC connection.
    - **release**: if the test passes, publishes `asterisk-<version>-offline-ubuntu2404-<date>-r<run>.tar.gz` and its `.sha256` under **Releases**.
 3. Download the `.tar.gz` from the release.
 
@@ -93,12 +94,12 @@ Customisations compared to the stock samples (full diff: `configs/custom-vs-22.1
 | `extconfig.conf` | `ps_*` tables → `odbc,asterisk` |
 | `sorcery.conf` | `[res_pjsip]` endpoint/auth/aor/domain_alias/contact → realtime |
 | `res_odbc.conf` | `[asterisk]` enabled, credentials, `pre-connect` |
-| `modules.conf` | `preload-require` for `res_odbc.so` and `res_config_odbc.so` |
+| `modules.conf` | `preload-require` for `res_odbc.so` and `res_config_odbc.so`; `noload` for the unused `cdr_radius.so` / `cel_radius.so` |
 | `pjsip.conf` | `transport-udp` (5060) and `transport-wss` |
 | `http.conf` | enabled on `0.0.0.0:8088` |
 | `ari.conf` | `pretty = yes`, ARI user |
 | `confbridge.conf` | `my_bridge`, `my_user`, `my_menu` profiles |
-| `extensions.conf` | `[default]` → `Dial(PJSIP/${EXTEN})`; 666/777 conference via `Gosub` |
+| `extensions.conf` | `[default]` → `Dial(PJSIP/${EXTEN})`; 666/777 conference via `Gosub`; 888 joins the fixed conference `1234` |
 | `res_config_mysql.conf` | database settings (unused, ODBC is used instead) |
 | `codecs.conf` | `[g723] sendrate=63` for `codec_g723` (6.3 kbps, the codec's default made explicit) |
 
@@ -131,6 +132,8 @@ The default `REQUIRED_MODULES` covers what the current configuration uses: ODBC 
 - **`Macro()` → `Gosub()`.** `app_macro` was removed in Asterisk 21. The 666/777 conference flow uses `Gosub(sub-create_conference,s,1)` / `Gosub(sub-join_conference,s,1)` with the same `X-ConfNum` header and `GROUP(conference)` logic.
 - **Package name.** The package is `asterisk-offline`. It conflicts with Ubuntu's own `asterisk` packages (20.x on noble), so the two cannot be installed side by side.
 - **Portable build.** `BUILD_NATIVE` is disabled, so the `.deb` is not tied to the CPU of the build machine.
+- **systemd.** Asterisk is linked against libsystemd, so the `Type=notify` unit becomes active when Asterisk reports ready. `RuntimeDirectory=asterisk` recreates `/run/asterisk` on every start, so the service also comes up after a reboot.
+- **RADIUS.** `cdr_radius` and `cel_radius` are disabled in `modules.conf`. Asterisk looks for `/etc/radiusclient-ng/radiusclient.conf`, while Ubuntu's radcli installs `/etc/radcli/radiusclient.conf`, so these modules could not load in the previous package either. To use RADIUS accounting, remove the `noload` lines and set `radiuscfg => /etc/radcli/radiusclient.conf` in the `[radius]` section of `cdr.conf` and `cel.conf`.
 - **G.723.1.** `codec_g723.so` is the asterisk-g72x author's prebuilt module for Asterisk 22 (from asterisk.hosting.lv, checked against the published MD5SUM). Intel IPP is linked statically into it. It cannot be compiled from source in this project because G.723.1 needs Intel's discontinued IPP speech codec libraries. The default CPU variant `x86_64-pentium4` runs on every x86-64 CPU. `install.sh` checks that the module runs and that G.723.1 ↔ slin translation works. The send rate is set in `codecs.conf` (`[g723] sendrate=63` or `53`).
 - **ConfBridge language.** `confbridge.conf` uses `language=en_GB`, but only `en` sounds are packaged.
 - **Package freshness.** Packages are as current as the day the bundle was built. Rebuild the bundle before a new installation to pick up security updates.

@@ -91,8 +91,8 @@ All 16 were unmodified stock samples in the old package, so no setting is lost.
 
 | File | Old (18.13) | New (22.11) | Adaptation |
 |---|---|---|---|
-| `extensions.conf` | `Macro(create_conference)` / `Macro(join_conference)` | `Gosub(sub-create_conference,s,1)` / `Gosub(sub-join_conference,s,1)` | `app_macro` was removed in Asterisk 21. Contexts renamed `macro-*` → `sub-*`, `Return()` added. |
-| `modules.conf` | `preload => res_odbc.so`, `res_config_odbc.so` | `preload-require => …` | Asterisk refuses to start if ODBC realtime cannot load, instead of running without it. |
+| `extensions.conf` | `Macro(create_conference)` / `Macro(join_conference)` | `Gosub(sub-create_conference,s,1)` / `Gosub(sub-join_conference,s,1)`, plus `888` → `Gosub(sub-join_conference2,s,1)` (fixed conference `1234`) | `app_macro` was removed in Asterisk 21. Contexts renamed `macro-*` → `sub-*`, `Return()` added. Extension 888 comes from the later manual 22.10 configuration set. |
+| `modules.conf` | `preload => res_odbc.so`, `res_config_odbc.so` | `preload-require => …`; `noload => cdr_radius.so`, `cel_radius.so` | Asterisk refuses to start if ODBC realtime cannot load, instead of running without it. The RADIUS modules look for `/etc/radiusclient-ng/radiusclient.conf`, but radcli installs `/etc/radcli/radiusclient.conf` (on Ubuntu 20.04 as well), so they never loaded in the old package; they are now disabled explicitly. |
 | `res_odbc.conf` | user `root` | user from `config.env` (`asterisk`) | Dedicated database user; values come from placeholders. |
 | `res_config_mysql.conf` | root credentials | placeholders | Same content; the module is not built (as before). |
 | `ari.conf` | user `user` / `user` | placeholders, defaults `user` / `user` | Unchanged otherwise. |
@@ -167,7 +167,7 @@ To keep parity with the old package, `collect-packages.sh` also installs:
 | Database user for Asterisk | `root` | dedicated `asterisk` user; `'root'@'%'` remote access kept (`ROOT_REMOTE=yes`) |
 | MySQL setup | `mysql_secure_installation` via expect | equivalent SQL (anonymous users and test database removed) |
 | Schema | alembic 1.13 + mysqlclient, Python 3.8 | alembic + PyMySQL in a Python 3.12 venv, schema at the 22.11 head |
-| Service | SysV init script (`make config`) | Asterisk's systemd unit |
+| Service | SysV init script (`make config`) | Asterisk's systemd unit (`Type=notify`; Asterisk linked against libsystemd; `RuntimeDirectory=asterisk` for `/run/asterisk` after reboot) |
 | pjproject | 2.12 (bundled) | 2.17 (bundled) |
 | Sounds | core-sounds-en-gsm, moh-opsound-wav, extra-sounds-en-wav (cached) | the same three, built into the `.deb` |
 | `codec_opus` | `codec_opus.so` | `codec_opus.so` and `format_ogg_opus.so` |

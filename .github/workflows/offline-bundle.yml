@@ -175,13 +175,14 @@ jobs:
             done
             [ "$(systemctl show -p NRestarts --value asterisk)" = 0 ]
             ls -ld /run/asterisk
+            systemctl show -p After --value asterisk | tr " " "\n" | grep -x mysql.service >/dev/null
             asterisk -rx "core show version"
             n="$(asterisk -rx "odbc show asterisk" | sed -n "s/.*Number of active connections: \([0-9]*\).*/\1/p")"
             echo "ODBC active connections: ${n:-0}"; [ "${n:-0}" -ge 1 ]
             asterisk -rx "module show like codec_g723" | grep -E "codec_g723.so .*Running" >/dev/null
             asterisk -rx "dialplan show 888@default" | grep -F "Gosub(sub-join_conference2,s,1)" >/dev/null
             echo "reboot test passed"
-          ' || { docker exec target journalctl -u asterisk -n 80 --no-pager || true; exit 1; }
+          ' || { docker exec target bash -c 'journalctl -u asterisk -n 80 --no-pager; echo "--- ODBC log lines:"; grep -iE "odbc|SQLConnect" /var/log/asterisk/messages.log | tail -20; systemctl cat asterisk' || true; exit 1; }
 
   release:
     needs: [build, test, test-systemd]

@@ -118,7 +118,10 @@ eval "$(grep -E '^PACKAGES_DEBIAN(_BUILD)?=' "$SRC/contrib/scripts/install_prere
 DROP=" doxygen graphviz subversion wget "
 # libjwt-dev is required by res_stir_shaken / res_pjsip_stir_shaken in Asterisk 21+,
 # but install_prereq does not list it; without it menuselect silently skips both modules.
-BUILD_PKGS="dpkg-dev binutils libjwt-dev"
+# libsystemd-dev is required for sd_notify(): the shipped systemd unit is Type=notify and
+# waits for READY=1. Without it Asterisk never reports ready and systemd kills it after
+# the start timeout. install_prereq does not list it either.
+BUILD_PKGS="dpkg-dev binutils libjwt-dev libsystemd-dev"
 apt-get update
 for p in $PACKAGES_DEBIAN; do
   [[ "$DROP" == *" $p "* ]] && continue
@@ -198,6 +201,15 @@ done
 
 # systemd unit and alembic schema scripts
 install -D -m 644 contrib/systemd/asterisk.service "$DEST/usr/lib/systemd/system/asterisk.service"
+# /run is a tmpfs: let systemd create /run/asterisk (owned by User=asterisk) on every start,
+# otherwise the control socket cannot be created after a reboot.
+sed -i 's|^#RuntimeDirectory=asterisk|RuntimeDirectory=asterisk|' "$DEST/usr/lib/systemd/system/asterisk.service"
+grep -q '^RuntimeDirectory=asterisk' "$DEST/usr/lib/systemd/system/asterisk.service" \
+  || die "could not enable RuntimeDirectory in asterisk.service"
+# The unit is Type=notify: Asterisk must be linked against libsystemd to send READY=1
+objdump -p "$DEST/usr/sbin/asterisk" | grep -E 'NEEDED +libsystemd\.so' >/dev/null \
+  || die "asterisk is not linked against libsystemd; the Type=notify service would never become ready"
+echo "  asterisk is linked against libsystemd (sd_notify), RuntimeDirectory enabled."
 mkdir -p "$DEST/usr/share/asterisk"
 cp -a contrib/ast-db-manage "$DEST/usr/share/asterisk/ast-db-manage"
 rm -f "$DEST/usr/share/asterisk/ast-db-manage/config.ini"

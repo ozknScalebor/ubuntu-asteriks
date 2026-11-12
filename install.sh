@@ -183,13 +183,24 @@ echo "SELECT COUNT(*) AS ps_tables FROM information_schema.tables WHERE table_sc
 # ---------------------------------------------------------------------
 log "8/8 Asterisk service and verification"
 [ "$HAS_SYSTEMD" = 1 ] && systemctl daemon-reload
-svc enable asterisk; svc restart asterisk
+svc enable asterisk
+if ! svc restart asterisk; then
+  [ "$HAS_SYSTEMD" = 1 ] && { systemctl status asterisk --no-pager -l || true; journalctl -u asterisk -n 50 --no-pager || true; }
+  die "asterisk service failed to start"
+fi
 UP=0
 for i in $(seq 1 30); do asterisk -rx 'core waitfullybooted' >/dev/null 2>&1 && { UP=1; break; }; sleep 1; done
 # Asterisk opens its control socket before loading modules; if a required module
 # fails, waitfullybooted can succeed and the process exits right after.
 sleep 2; asterisk -rx 'core show uptime' >/dev/null 2>&1 || UP=0
 [ "$UP" = 1 ] || die "Asterisk did not start within 30 s. A preload-require module in modules.conf may have failed to load: /var/log/asterisk/messages.log"
+if [ "$HAS_SYSTEMD" = 1 ]; then
+  # The unit is Type=notify: active means Asterisk reported READY=1 to systemd
+  [ "$(systemctl is-active asterisk)" = active ] || { systemctl status asterisk --no-pager -l || true; die "asterisk.service is not active"; }
+  [ "$(systemctl show -p NRestarts --value asterisk)" = 0 ] || die "asterisk.service restarted during startup (see journalctl -u asterisk)"
+  systemctl is-enabled asterisk >/dev/null || die "asterisk.service is not enabled at boot"
+  echo "  asterisk.service: active, enabled, no restarts"
+fi
 
 echo; asterisk -rx 'core show version'
 echo; asterisk -rx 'odbc show asterisk'

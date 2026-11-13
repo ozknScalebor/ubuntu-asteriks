@@ -83,7 +83,7 @@ jobs:
           . ./config.env
           NAME="asterisk-${ASTERISK_VERSION}-offline-ubuntu2404-$(date -u +%Y%m%d)-r${GITHUB_RUN_NUMBER}"
           mkdir -p "dist/$NAME"
-          cp -a README.md config.env install.sh collect-packages.sh build-asterisk-deb.sh configs tools bundle "dist/$NAME/"
+          cp -a README.md config.env install.sh uninstall.sh collect-packages.sh build-asterisk-deb.sh configs tools bundle "dist/$NAME/"
           chmod +x "dist/$NAME"/*.sh
           tar -C dist -czf "dist/$NAME.tar.gz" "$NAME"
           (cd dist && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
@@ -100,27 +100,52 @@ jobs:
           compression-level: 0
 
   test:
+    # install -> uninstall -> system must match the state before -> install again
+    # -> uninstall with a later package that depends on one of ours
     needs: build
     if: inputs.test_install
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: tests
+
       - uses: actions/download-artifact@v4
         with:
           name: bundle
           path: dist
 
-      - name: Install in a container with no network access
+      - name: Install, uninstall and reinstall in a container with no network access
         run: |
           NAME="${{ needs.build.outputs.name }}"
           (cd dist && sha256sum -c "$NAME.tar.gz.sha256")
           tar -C dist -xzf "dist/$NAME.tar.gz"
           # --network none: the container has no network access at all
-          docker run --rm --network none -v "$PWD/dist/$NAME:/pkg" ubuntu:24.04 bash -euc '
-            cd /pkg && bash ./install.sh
-            echo
-            echo "Compiler present on target after install?"
-            if dpkg -s gcc >/dev/null 2>&1; then echo "  yes (unexpected)"; exit 1; else echo "  no"; fi
-          '
+          docker run --rm --network none -v "$PWD/dist/$NAME:/pkg" -v "$PWD/tests:/tests:ro" ubuntu:24.04 \
+            bash -c 'cd /pkg && bash /tests/test-reinstall.sh'
+
+  test-preexisting:
+    # MySQL with another database, unixODBC and curl exist before install.sh;
+    # uninstall.sh must leave them exactly as they were
+    needs: build
+    if: inputs.test_install
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: tests
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundle
+          path: dist
+
+      - name: Install and uninstall next to existing software, no network access
+        run: |
+          NAME="${{ needs.build.outputs.name }}"
+          tar -C dist -xzf "dist/$NAME.tar.gz"
+          docker run --rm --network none -v "$PWD/dist/$NAME:/pkg" -v "$PWD/tests:/tests:ro" ubuntu:24.04 \
+            bash -c 'cd /pkg && bash /tests/test-preexisting.sh'
 
   test-systemd:
     # Same offline install, but under a real systemd (as on an Ubuntu server/desktop):
@@ -130,6 +155,10 @@ jobs:
     if: inputs.test_install
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: tests
+
       - uses: actions/download-artifact@v4
         with:
           name: bundle
@@ -151,42 +180,43 @@ jobs:
           NAME="${{ needs.build.outputs.name }}"
           docker run -d --name target --privileged --cgroupns=host --network none \
             -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock \
-            -v "$PWD/dist/$NAME:/pkg" ubuntu-systemd:24.04
+            -v "$PWD/dist/$NAME:/pkg" -v "$PWD/tests:/tests:ro" ubuntu-systemd:24.04
           for i in $(seq 1 60); do
             st="$(docker exec target systemctl is-system-running 2>/dev/null || true)"
             case "$st" in running|degraded) echo "systemd: $st"; break;; esac; sleep 1
           done
 
       - name: Install under systemd
-        run: docker exec target bash -c 'cd /pkg && bash ./install.sh'
+        run: docker exec target bash -c 'bash /tests/snapshot.sh /root/before && cd /pkg && bash ./install.sh'
 
       - name: Reboot and verify that everything comes back on its own
         run: |
-          docker restart target
-          for i in $(seq 1 60); do
-            st="$(docker exec target systemctl is-system-running 2>/dev/null || true)"
-            case "$st" in running|degraded) echo "systemd after reboot: $st"; break;; esac; sleep 1
-          done
-          docker exec target bash -euc '
-            for i in $(seq 1 60); do asterisk -rx "core waitfullybooted" >/dev/null 2>&1 && break; sleep 1; done
-            for u in mysql asterisk; do
-              printf "%-10s %s, %s, restarts=%s\n" "$u" "$(systemctl is-active $u)" "$(systemctl is-enabled $u)" "$(systemctl show -p NRestarts --value $u)"
-              [ "$(systemctl is-active $u)" = active ]
+          reboot_target() {
+            docker restart target
+            for i in $(seq 1 60); do
+              st="$(docker exec target systemctl is-system-running 2>/dev/null || true)"
+              case "$st" in running|degraded) echo "systemd after reboot: $st"; break;; esac; sleep 1
             done
-            [ "$(systemctl show -p NRestarts --value asterisk)" = 0 ]
-            ls -ld /run/asterisk
-            systemctl show -p After --value asterisk | tr " " "\n" | grep -x mysql.service >/dev/null
-            asterisk -rx "core show version"
-            n="$(asterisk -rx "odbc show asterisk" | sed -n "s/.*Number of active connections: \([0-9]*\).*/\1/p")"
-            echo "ODBC active connections: ${n:-0}"; [ "${n:-0}" -ge 1 ]
-            asterisk -rx "module show like codec_g723" | grep -E "codec_g723.so .*Running" >/dev/null
-            asterisk -rx "dialplan show 888@default" | grep -F "Gosub(sub-join_conference2,s,1)" >/dev/null
-            echo "reboot test passed"
-          ' || { docker exec target bash -c 'journalctl -u asterisk -n 80 --no-pager; echo "--- ODBC log lines:"; grep -iE "odbc|SQLConnect" /var/log/asterisk/messages.log | tail -20; systemctl cat asterisk' || true; exit 1; }
+          }
+          diagnose() { docker exec target bash -c 'journalctl -u asterisk -n 80 --no-pager; echo "--- ODBC log lines:"; grep -iE "odbc|SQLConnect" /var/log/asterisk/messages.log | tail -20; systemctl cat asterisk' || true; }
+          reboot_target
+          docker exec target bash /tests/check-after-boot.sh || { diagnose; exit 1; }
+
+          echo "=================== uninstall under systemd"
+          docker exec target bash -euc '
+            bash /var/lib/asterisk-offline/uninstall.sh --yes
+            ! systemctl cat asterisk.service >/dev/null 2>&1
+            ! systemctl cat mysql.service >/dev/null 2>&1
+            bash /tests/check-removed.sh /root/before
+          '
+          echo "=================== reinstall, reboot"
+          docker exec target bash -c 'cd /pkg && bash ./install.sh'
+          reboot_target
+          docker exec target bash /tests/check-after-boot.sh || { diagnose; exit 1; }
 
   release:
-    needs: [build, test, test-systemd]
-    if: always() && needs.build.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped') && (needs.test-systemd.result == 'success' || needs.test-systemd.result == 'skipped')
+    needs: [build, test, test-preexisting, test-systemd]
+    if: always() && needs.build.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped') && (needs.test-preexisting.result == 'success' || needs.test-preexisting.result == 'skipped') && (needs.test-systemd.result == 'success' || needs.test-systemd.result == 'skipped')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
@@ -199,7 +229,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           NAME="${{ needs.build.outputs.name }}"
-          TESTED="${{ needs.test.result == 'success' && needs.test-systemd.result == 'success' && 'Installation tests passed with no network access: in a plain ubuntu:24.04 container, and on ubuntu:24.04 with systemd including a reboot.' || 'Installation tests were not run.' }}"
+          TESTED="${{ needs.test.result == 'success' && needs.test-preexisting.result == 'success' && needs.test-systemd.result == 'success' && 'Tests passed with no network access on ubuntu:24.04: install, uninstall and reinstall (the system matches its state before installation after each uninstall), uninstall next to pre-existing MySQL data and packages, and under systemd including reboots.' || 'Installation tests were not run.' }}"
           gh release create "$NAME" dist/"$NAME".tar.gz dist/"$NAME".tar.gz.sha256 \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "$NAME" \
@@ -208,4 +238,5 @@ jobs:
           $TESTED
 
           Usage: copy the archive to the offline Ubuntu 24.04 machine, extract it,
-          adjust config.env if needed and run: sudo bash install.sh"
+          adjust config.env if needed and run: sudo bash install.sh
+          To remove it again: sudo bash uninstall.sh"

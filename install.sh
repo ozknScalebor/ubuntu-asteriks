@@ -10,6 +10,10 @@
 #
 #  Usage:  sudo bash install.sh
 #  Log:    /var/log/asterisk-offline-install.log
+#
+#  What the system looked like before the first installation (packages,
+#  users, MySQL accounts, odbc.ini, ...) is recorded in /var/lib/asterisk-offline
+#  so that uninstall.sh removes only what this installer added.
 # =====================================================================
 set -euo pipefail
 
@@ -77,6 +81,35 @@ mysql_up() {
 }
 
 # ---------------------------------------------------------------------
+# Installation record for uninstall.sh. Every value is recorded only the first
+# time it is reached, so re-running install.sh keeps the original state.
+STATE=/var/lib/asterisk-offline
+mkdir -p "$STATE/orig"; chmod 700 "$STATE"
+touch "$STATE/state.env" "$STATE/new-packages.txt" "$STATE/etc-backups.txt"
+state_has() { grep "^$1=" "$STATE/state.env" >/dev/null; }
+state_set() { state_has "$1" || printf '%s=%q\n' "$1" "$2" >> "$STATE/state.env"; }
+yes_no() { if "$@" >/dev/null 2>&1; then echo 1; else echo 0; fi; }
+installed_pkgs() { dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' | awk '$1=="ii"{print $2}' | sort -u; }
+state_set DB_NAME "$DB_NAME"
+state_set DB_USER "$DB_USER"
+state_set ASTERISK_USER_PREEXISTED "$(yes_no getent passwd asterisk)"
+state_set ASTERISK_GROUP_PREEXISTED "$(yes_no getent group asterisk)"
+state_set MYSQL_USER_PREEXISTED "$(yes_no getent passwd mysql)"
+state_set MYSQL_GROUP_PREEXISTED "$(yes_no getent group mysql)"
+state_set ODBC_DRIVER_PREEXISTED "$(yes_no odbcinst -q -d -n 'MariaDB Unicode')"
+if ! state_has ODBC_INI_PREEXISTED; then   # overwritten in step 7
+  if [ -e /etc/odbc.ini ]; then cp -p /etc/odbc.ini "$STATE/orig/odbc.ini"; state_set ODBC_INI_PREEXISTED 1
+  else state_set ODBC_INI_PREEXISTED 0; fi
+fi
+# purging tzdata (if this installer adds it) deletes these
+for f in /etc/localtime /etc/timezone; do
+  { [ -e "$f" ] || [ -L "$f" ]; } && [ ! -e "$STATE/orig/$(basename "$f")" ] && [ ! -L "$STATE/orig/$(basename "$f")" ] && cp -P "$f" "$STATE/orig/"
+done
+cp "$HERE/uninstall.sh" "$STATE/uninstall.sh"; chmod 700 "$STATE/uninstall.sh"
+# kept until step 1 has finished, so an interrupted run does not lose track of its packages
+[ -f "$STATE/.pkgs-before" ] || installed_pkgs > "$STATE/.pkgs-before"
+
+# ---------------------------------------------------------------------
 log "1/8 Installing packages from the local repository (no internet)"
 STAGE=/opt/asterisk-offline
 mkdir -p "$STAGE"
@@ -89,7 +122,14 @@ APT_OPTS=(-o Dir::Etc::sourcelist="$APT_LIST" -o Dir::Etc::sourceparts=- -o APT:
 apt-get "${APT_OPTS[@]}" update
 apt-get "${APT_OPTS[@]}" -y --no-install-recommends install $(cat "$STAGE/bundle/debs/PACKAGE-LIST.txt")
 rm -f "$APT_LIST"
+# packages added by this run (dependencies included) / removed by it (conflicts)
+installed_pkgs > "$STATE/.pkgs-after"
+{ cat "$STATE/new-packages.txt"; comm -13 "$STATE/.pkgs-before" "$STATE/.pkgs-after"; } | sort -u > "$STATE/.new"
+mv "$STATE/.new" "$STATE/new-packages.txt"
+comm -23 "$STATE/.pkgs-before" "$STATE/.pkgs-after" >> "$STATE/removed-packages.txt"
+rm -f "$STATE/.pkgs-before" "$STATE/.pkgs-after"
 dpkg-query -W -f='  ${Package} ${Version}\n' asterisk-offline
+echo "  $(wc -l < "$STATE/new-packages.txt") packages were added by this installer."
 
 # ---------------------------------------------------------------------
 log "2/8 asterisk user"
@@ -107,10 +147,15 @@ echo "  All $(echo $REQUIRED_MODULES | wc -w) required modules are present."
 # ---------------------------------------------------------------------
 log "4/8 Configuration: /etc/asterisk <- configs/asterisk/ (complete set)"
 # A previous installation's /etc/asterisk is kept as a backup.
+BK=""
 if [ -d /etc/asterisk ] && [ -n "$(ls -A /etc/asterisk 2>/dev/null)" ]; then
   BK="/etc/asterisk.bak-$(date +%Y%m%d-%H%M%S)"
   mv /etc/asterisk "$BK"; echo "  previous /etc/asterisk backed up to $BK"
 fi
+# The first backup is the configuration that existed before this installer
+# (kept by uninstall.sh); later ones are backups of this installer's own files.
+state_set ETC_ASTERISK_PREVIOUS "$BK"
+[ -z "$BK" ] || echo "$BK" >> "$STATE/etc-backups.txt"
 mkdir -p /etc/asterisk
 for f in "$HERE"/configs/asterisk/*; do subst "$f" "/etc/asterisk/$(basename "$f")"; done
 sed -i '/^;runuser/s/^;//;/^;rungroup/s/^;//' /etc/asterisk/asterisk.conf
@@ -125,6 +170,12 @@ chmod -R u=rwX,g=rX,o= /etc/asterisk /var/{lib,log,spool}/asterisk
 # ---------------------------------------------------------------------
 log "6/8 MySQL"
 svc enable mysql; svc restart mysql; mysql_up
+
+mysql_has_user() { [ "$(mysql -N -e "SELECT COUNT(*) FROM mysql.user WHERE user='$(sql_str "$1")' AND host='$2'")" != 0 ]; }
+state_set DB_PREEXISTED "$(yes_no test -n "$(mysql -N -e "SHOW DATABASES LIKE '$(sql_str "$DB_NAME")'")")"
+state_set MYSQL_LOCAL_USER_PREEXISTED "$(yes_no mysql_has_user "$DB_USER" localhost)"
+state_set MYSQL_REMOTE_USER_PREEXISTED "$(yes_no mysql_has_user "$DB_USER" %)"
+state_set MYSQL_ROOT_REMOTE_PREEXISTED "$(yes_no mysql_has_user root %)"
 
 mysql <<SQL
 -- What mysql_secure_installation does
@@ -168,6 +219,7 @@ if [ "$DB_REMOTE" = "yes" ] || [ "$ROOT_REMOTE" = "yes" ]; then
 fi
 
 if [ "$MYSQL_BIND_ALL" = "yes" ]; then
+  [ -f "$STATE/orig/mysqld.cnf" ] || cp -p /etc/mysql/mysql.conf.d/mysqld.cnf "$STATE/orig/mysqld.cnf"
   sed -i 's/^bind-address\s*=.*/bind-address = 0.0.0.0/' /etc/mysql/mysql.conf.d/mysqld.cnf
   svc restart mysql; mysql_up
 fi
@@ -267,3 +319,4 @@ fi
 [ -z "$FAIL" ] || die "installation verification failed:$FAIL  (log: /var/log/asterisk/messages.log)"
 
 log "Done. Log: $LOG"
+echo "To remove everything this installer added: sudo bash $STATE/uninstall.sh"

@@ -22,8 +22,9 @@ Asterisk is compiled once (on GitHub Actions or any internet-connected Ubuntu 24
 1. Open **Actions → Offline bundle → Run workflow**. Optionally enter a different Asterisk version.
 2. The workflow runs three jobs:
    - **build**: compiles Asterisk into a `.deb` and downloads every runtime dependency inside a clean `ubuntu:24.04` container. The `.deb` includes the sound packages, `codec_opus`, `codec_g723`, the systemd unit and the alembic scripts. The bundle contents are checked before continuing.
-   - **test**: extracts the bundle in an `ubuntu:24.04` container started with `--network none` and runs `install.sh` end to end. It also checks that no compiler was installed.
-   - **test-systemd**: the same offline installation on `ubuntu:24.04` running systemd, followed by a reboot of the container. MySQL and Asterisk must come back on their own, with an active ODBC connection.
+   - **test**: extracts the bundle in an `ubuntu:24.04` container started with `--network none` and runs `install.sh` end to end (no compiler may end up on the target). It then runs `uninstall.sh` and checks that the system matches its state before the installation (packages, users and groups, files), installs again, and uninstalls once more with a package installed in between that depends on one of the installer's packages; that package and its dependency must stay.
+   - **test-preexisting**: MySQL with another database, unixODBC with its own `odbc.ini`, and curl are installed before `install.sh`. After `uninstall.sh` they must be exactly as before: same packages, same MySQL accounts, the other database intact, `odbc.ini` and `mysqld.cnf` restored.
+   - **test-systemd**: the same offline installation on `ubuntu:24.04` running systemd, followed by a reboot of the container. MySQL and Asterisk must come back on their own, with an active ODBC connection. Then uninstall (the system must match its state before), install again and reboot again.
    - **release**: if the test passes, publishes `asterisk-<version>-offline-ubuntu2404-<date>-r<run>.tar.gz` and its `.sha256` under **Releases**.
 3. Download the `.tar.gz` from the release.
 
@@ -48,6 +49,15 @@ sudo bash install.sh
 
 The installation takes a few minutes. The log is written to `/var/log/asterisk-offline-install.log`.
 
+### 3. Uninstall
+
+```bash
+sudo bash uninstall.sh --dry-run   # shows what would be removed and kept, changes nothing
+sudo bash uninstall.sh             # asks for confirmation
+```
+
+`install.sh` copies the uninstaller to `/var/lib/asterisk-offline/uninstall.sh`, so the bundle folder is not needed for it. See [Uninstalling](#uninstalling).
+
 ## What `install.sh` does
 
 1. Installs the packages from `bundle/debs` through a temporary local apt repository. The system's apt sources are not modified. Besides Asterisk, MySQL and ODBC this includes `curl` and MySQL's recommended packages, which the previous 18.13 package also installed.
@@ -62,6 +72,34 @@ The installation takes a few minutes. The log is written to `/var/log/asterisk-o
    - optionally allows remote root access and binds to all interfaces
 7. Configures the ODBC DSN `asterisk` and creates the schema with alembic.
 8. Starts Asterisk via systemd and verifies the installation (see below). A drop-in (`/etc/systemd/system/asterisk.service.d/10-mysql.conf`) makes Asterisk start after MySQL, so ODBC realtime is available right after a reboot.
+
+## Uninstalling
+
+`uninstall.sh` removes only what `install.sh` added. Before the first installation, `install.sh` records the state of the system in `/var/lib/asterisk-offline`: the installed packages, whether the `asterisk` and `mysql` users and groups, the MySQL database and accounts, `/etc/odbc.ini`, the ODBC driver entry and `/etc/localtime` already existed, and the original `mysqld.cnf`. Re-running `install.sh` keeps this record.
+
+| What | Removed | Kept |
+|---|---|---|
+| Packages | packages `install.sh` added, dependencies included | packages that were installed before; packages that software installed later still needs (found with an `apt-get` simulation before anything is changed) |
+| Asterisk | service, `/etc/asterisk`, data, logs, spool, modules, systemd drop-in, alembic venv, `/opt/asterisk-offline` | `/etc/asterisk.bak-*` made from a configuration that existed before `install.sh` |
+| MySQL, installed by `install.sh` and holding only the Asterisk database | the server, `/var/lib/mysql`, `/etc/mysql`, the `mysql` user | |
+| MySQL that existed before, or holds other databases | the Asterisk database and the accounts `install.sh` created (`asterisk@localhost`, `asterisk@%`, `root@%`) | the server, other databases and accounts; `mysqld.cnf` is restored (bind-address) |
+| ODBC | the `asterisk` DSN and the `MariaDB Unicode` driver entry | a previous `/etc/odbc.ini` is restored |
+| Users | `asterisk` (and `mysql`) if `install.sh` created them | users that existed before |
+
+Before removing anything, the uninstaller stops Asterisk and writes a backup to `/var/backups/asterisk-offline-uninstall-<timestamp>/`: `/etc/asterisk`, the Asterisk data (`astdb`, voicemail, recordings, CDR files, logs), a `mysqldump` of the Asterisk database, `odbc.ini`, `mysqld.cnf` and the installation record. If the database dump fails, nothing is removed.
+
+| Option | Effect |
+|---|---|
+| `-n`, `--dry-run` | print the plan and the commands, change nothing |
+| `-y`, `--yes` | do not ask for confirmation (required when not run from a terminal) |
+| `--keep-mysql` | leave MySQL completely untouched: server, databases, accounts, settings |
+| `--no-backup` | skip the backup |
+
+Limits:
+
+- Packages that `install.sh` removed (for example Ubuntu's own `asterisk` package, which conflicts with `asterisk-offline`) and packages it upgraded cannot be restored offline. The plan lists removed packages.
+- An installation made with a bundle older than the uninstaller has no record. In that case only `asterisk-offline`, the Asterisk files, the Asterisk database with the `asterisk` accounts and the ODBC DSN are removed; the other packages, the `asterisk` user, `'root'@'%'` and the MySQL bind-address stay.
+- The log is written to `/var/log/asterisk-offline-uninstall.log`. The installation log is not deleted.
 
 ## Configuration
 
@@ -149,13 +187,15 @@ config.env                  versions, passwords, switches
 build-asterisk-deb.sh       compiles Asterisk into bundle/debs/asterisk-offline_*.deb (online)
 collect-packages.sh         collects runtime dependencies and wheels into bundle/ (online)
 install.sh                  installs on the offline target
+uninstall.sh                removes what install.sh added (also copied to /var/lib/asterisk-offline)
 configs/asterisk/           complete /etc/asterisk with placeholders
 configs/odbc/odbc.ini.in    ODBC DSN template
 configs/custom-vs-22.11-samples.diff   customisations vs. the stock samples
 tools/build-configs.py      regenerates configs/asterisk/ for a new Asterisk release
 tools/expected-modules.txt  every module the .deb must contain (build fails otherwise)
 docs/migration-from-18.md   item-by-item comparison with the previous 18.13 package
-.github/workflows/          GitHub Actions: build, offline install test, release
+tests/                      install/uninstall test scripts used by the workflow
+.github/workflows/          GitHub Actions: build, offline install/uninstall tests, release
 ```
 
 `bundle/`, `build/` and `dist/` are generated and not committed.

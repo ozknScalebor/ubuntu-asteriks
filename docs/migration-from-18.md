@@ -169,6 +169,7 @@ To keep parity with the old package, `collect-packages.sh` also installs:
 | MySQL setup | `mysql_secure_installation` via expect | equivalent SQL (anonymous users and test database removed) |
 | Schema | alembic 1.13 + mysqlclient, Python 3.8 | alembic + PyMySQL in a Python 3.12 venv, schema at the 22.11 head |
 | Service | SysV init script (`make config`) | Asterisk's systemd unit (`Type=notify`; Asterisk linked against libsystemd; `RuntimeDirectory=asterisk` for `/run/asterisk` after reboot) |
+| Uninstall | none (Asterisk built with `make install`, files not tracked) | `uninstall.sh`: removes only what `install.sh` added, based on a record of the system state taken before installation; backup first (see README) |
 | pjproject | 2.12 (bundled) | 2.17 (bundled) |
 | Sounds | core-sounds-en-gsm, moh-opsound-wav, extra-sounds-en-wav (cached) | the same three, built into the `.deb` |
 | `codec_opus` | `codec_opus.so` | `codec_opus.so` and `format_ogg_opus.so` |

@@ -24,9 +24,12 @@ exec > >(tee -a "$LOG") 2>&1
 log() { echo -e "\n-----------------------------------------------------------\n---- $*\n-----------------------------------------------------------"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-for v in DB_PASS ARI_PASS $( [ "$ROOT_REMOTE" = yes ] && echo ROOT_REMOTE_PASS ); do
+for v in DB_PASS ARI_PASS $( [ "$ROOT_REMOTE" = yes ] && echo ROOT_REMOTE_PASS ) $( [ "$DB_REMOTE" = yes ] && echo DB_REMOTE_PASS ); do
   case "${!v}" in ""|CHANGE_ME) die "$v is not set in config.env.";; esac
 done
+
+case "$MYSQL_REMOTE_AUTH" in mysql_native_password|caching_sha2_password) ;;
+  *) die "MYSQL_REMOTE_AUTH must be mysql_native_password or caching_sha2_password.";; esac
 
 [ -f "$HERE/bundle/debs/Packages" ] || die "bundle/ not found. Run collect-packages.sh on an internet-connected machine first."
 . /etc/os-release
@@ -136,14 +139,32 @@ GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '$(sql_str "$DB_USER")'@'localhost';
 FLUSH PRIVILEGES;
 SQL
 
+if [ "$DB_REMOTE" = "yes" ]; then
+  # Applications on other hosts: data access to the Asterisk database only
+  mysql <<SQL
+CREATE USER IF NOT EXISTS '$(sql_str "$DB_USER")'@'%' IDENTIFIED WITH ${MYSQL_REMOTE_AUTH} BY '$(sql_str "$DB_REMOTE_PASS")';
+ALTER USER '$(sql_str "$DB_USER")'@'%' IDENTIFIED WITH ${MYSQL_REMOTE_AUTH} BY '$(sql_str "$DB_REMOTE_PASS")';
+GRANT SELECT, INSERT, UPDATE, DELETE ON \`${DB_NAME}\`.* TO '$(sql_str "$DB_USER")'@'%';
+FLUSH PRIVILEGES;
+SQL
+  GRANTS="$(mysql -N -e "SHOW GRANTS FOR '$(sql_str "$DB_USER")'@'%'")"
+  echo "$GRANTS" | sed 's/^/  /'
+  echo "$GRANTS" | grep -F "GRANT SELECT, INSERT, UPDATE, DELETE ON \`${DB_NAME}\`.*" >/dev/null \
+    || die "'$DB_USER'@'%' did not get the expected privileges."
+fi
+
 if [ "$ROOT_REMOTE" = "yes" ]; then
   # root@localhost keeps auth_socket, so 'sudo mysql' still works on the server
   mysql <<SQL
-CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED BY '$(sql_str "$ROOT_REMOTE_PASS")';
-ALTER USER 'root'@'%' IDENTIFIED BY '$(sql_str "$ROOT_REMOTE_PASS")';
+CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED WITH ${MYSQL_REMOTE_AUTH} BY '$(sql_str "$ROOT_REMOTE_PASS")';
+ALTER USER 'root'@'%' IDENTIFIED WITH ${MYSQL_REMOTE_AUTH} BY '$(sql_str "$ROOT_REMOTE_PASS")';
 GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 SQL
+fi
+
+if [ "$DB_REMOTE" = "yes" ] || [ "$ROOT_REMOTE" = "yes" ]; then
+  mysql -t -e "SELECT user, host, plugin FROM mysql.user WHERE host='%'" | sed 's/^/  /'
 fi
 
 if [ "$MYSQL_BIND_ALL" = "yes" ]; then

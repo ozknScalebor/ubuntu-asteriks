@@ -164,7 +164,8 @@ To keep parity with the old package, `collect-packages.sh` also installs:
 |---|---|---|
 | MySQL server | 8.0.36 (Ubuntu 20.04) | 8.0.46 (Ubuntu 24.04) |
 | ODBC driver | MySQL Connector/ODBC 8.3.0, debug build copied to `/usr/local/lib` | MariaDB Connector/ODBC 3.1 (`odbc-mariadb`) |
-| Database user for Asterisk | `root` | dedicated `asterisk` user; `'root'@'%'` remote access kept (`ROOT_REMOTE=yes`) |
+| Database user for Asterisk | `root` | dedicated `'asterisk'@'localhost'` with all privileges on the `asterisk` database |
+| Remote database access | `'root'@'%'` only (`allow-ip-permission.sh`), `mysql_native_password` | `'root'@'%'` kept (`ROOT_REMOTE=yes`); new `'asterisk'@'%'` with `SELECT, INSERT, UPDATE, DELETE` on `asterisk.*` for applications (`DB_REMOTE=yes`); both use `mysql_native_password` by default (`MYSQL_REMOTE_AUTH`) |
 | MySQL setup | `mysql_secure_installation` via expect | equivalent SQL (anonymous users and test database removed) |
 | Schema | alembic 1.13 + mysqlclient, Python 3.8 | alembic + PyMySQL in a Python 3.12 venv, schema at the 22.11 head |
 | Service | SysV init script (`make config`) | Asterisk's systemd unit (`Type=notify`; Asterisk linked against libsystemd; `RuntimeDirectory=asterisk` for `/run/asterisk` after reboot) |

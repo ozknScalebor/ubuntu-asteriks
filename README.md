@@ -57,7 +57,8 @@ The installation takes a few minutes. The log is written to `/var/log/asterisk-o
 5. Sets file ownership and permissions.
 6. Configures MySQL:
    - removes anonymous users and the test database
-   - creates the database and a dedicated `asterisk` user
+   - creates the database and `'asterisk'@'localhost'` with all privileges on it (used by ODBC and alembic)
+   - optionally creates `'asterisk'@'%'` for applications on other hosts, limited to `SELECT, INSERT, UPDATE, DELETE` on the Asterisk database, and checks its grants
    - optionally allows remote root access and binds to all interfaces
 7. Configures the ODBC DSN `asterisk` and creates the schema with alembic.
 8. Starts Asterisk via systemd and verifies the installation (see below). A drop-in (`/etc/systemd/system/asterisk.service.d/10-mysql.conf`) makes Asterisk start after MySQL, so ODBC realtime is available right after a reboot.
@@ -75,7 +76,9 @@ All versions, passwords and switches are in `config.env`:
 | `G72X_CODECS`, `G72X_CPU` | Prebuilt asterisk-g72x codecs (G.723.1) included in the `.deb`, and their CPU variant |
 | `REQUIRED_MODULES` | Modules that must be built and running (see *Verification*) |
 | `DB_NAME`, `DB_USER`, `DB_PASS` | Asterisk database and the user ODBC/alembic connect with |
+| `DB_REMOTE`, `DB_REMOTE_PASS` | Create `'<DB_USER>'@'%'` with `SELECT, INSERT, UPDATE, DELETE` on `<DB_NAME>.*` for remote applications |
 | `ROOT_REMOTE`, `ROOT_REMOTE_PASS` | Create `'root'@'%'` for remote access |
+| `MYSQL_REMOTE_AUTH` | Authentication plugin of the two remote accounts: `mysql_native_password` (default, as in the 18.13 package, works with older clients) or `caching_sha2_password` |
 | `MYSQL_BIND_ALL` | Set MySQL `bind-address = 0.0.0.0` |
 | `ARI_USER`, `ARI_PASS` | ARI user |
 
@@ -135,6 +138,7 @@ The default `REQUIRED_MODULES` covers what the current configuration uses: ODBC 
 - **systemd.** Asterisk is linked against libsystemd, so the `Type=notify` unit becomes active when Asterisk reports ready. `RuntimeDirectory=asterisk` recreates `/run/asterisk` on every start, so the service also comes up after a reboot.
 - **RADIUS.** `cdr_radius` and `cel_radius` are disabled in `modules.conf`. Asterisk looks for `/etc/radiusclient-ng/radiusclient.conf`, while Ubuntu's radcli installs `/etc/radcli/radiusclient.conf`, so these modules could not load in the previous package either. To use RADIUS accounting, remove the `noload` lines and set `radiuscfg => /etc/radcli/radiusclient.conf` in the `[radius]` section of `cdr.conf` and `cel.conf`.
 - **G.723.1.** `codec_g723.so` is the asterisk-g72x author's prebuilt module for Asterisk 22 (from asterisk.hosting.lv, checked against the published MD5SUM). Intel IPP is linked statically into it. It cannot be compiled from source in this project because G.723.1 needs Intel's discontinued IPP speech codec libraries. The default CPU variant `x86_64-pentium4` runs on every x86-64 CPU. `install.sh` checks that the module runs and that G.723.1 ↔ slin translation works. The send rate is set in `codecs.conf` (`[g723] sendrate=63` or `53`).
+- **MySQL accounts.** `'asterisk'@'localhost'` and `'asterisk'@'%'` are two separate accounts with their own passwords. Connections on the server itself (ODBC, alembic) use the `localhost` account; connections from other hosts use the `%` account, which cannot change the schema or reach other databases. For administration from another host use `'root'@'%'`.
 - **ConfBridge language.** `confbridge.conf` uses `language=en_GB`, but only `en` sounds are packaged.
 - **Package freshness.** Packages are as current as the day the bundle was built. Rebuild the bundle before a new installation to pick up security updates.
 
